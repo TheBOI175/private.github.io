@@ -159,26 +159,22 @@
   <script src="https://www.youtube.com/iframe_api"></script>
   <script>
 
-  function randomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-  }
-
   // ================= CONFIG =================
   const CONFIG = {
-    centerRadius: 37,        // Radius of the center circle
-    gracePeriod: 7000,
+    centerRadius: 50,        // Radius of the center circle
+    gracePeriod: 6500,        // Time before flings start (ms)
     
-    flingStrength: 67,             // Strong enough to always hit edges
+    flingStrength: 50,             // Strong enough to always hit edges
     flingRecoil: 0.5,              // Extra shake after fling
-    flingInterval: randomInt(1, 3),          // Average seconds between flings
+    flingInterval: 3,          // Average seconds between flings
     burstChance: 0.35,
     
-    mouseControl: 0.5,
+    mouseControl: 0.5,          // How much mouse movement affects velocity
     jitterIntensity: 6,          // Smooth constant shake
-    smoothing: 0.90,
+    smoothing: 0.85,               // Velocity damping (0-1), lower is more slippery
     
-    fillRate: 1.0,
-    drainRate: 0.5,
+    fillRate: 3,
+    drainRate: 1,
     
     videoId: 'Tj6ewHqYZpQ'
   };
