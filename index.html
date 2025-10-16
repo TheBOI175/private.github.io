@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pandemonium Minigame — Chaos Mode</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: black;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      color: white;
+    }
+
+    #game {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      cursor: none;
+    }
+
+    #centerCircle {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      top: 50%;
+      left: 50%;
+      margin-left: -40px;
+      margin-top: -40px;
+      border: 3px dashed rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      transition: border-color 0.2s;
+    }
+
+    #centerCircle.active {
+      border-color: rgba(0, 255, 0, 0.6);
+    }
+
+    #cursorDot {
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      background: white;
+      border-radius: 50%;
+      pointer-events: none;
+      margin-left: -8px;
+      margin-top: -8px;
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+    }
+
+    #cursorDot.flinged {
+      background: #ff4444;
+    }
+
+    #energyBar {
+      position: absolute;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 300px;
+      height: 14px;
+      background: rgba(40, 0, 0, 0.8);
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      overflow: visible;
+      border-radius: 7px;
+    }
+
+    #energyFill {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      height: 100%;
+      background: linear-gradient(90deg, #44ff44, #ffff44, #44ff44);
+      width: 100%;
+      transition: width 0.1s linear;
+      border-radius: 5px;
+    }
+
+    #message {
+      position: absolute;
+      top: 30px;
+      width: 100%;
+      text-align: center;
+      font-size: 22px;
+      font-weight: bold;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.9);
+      transition: color 0.3s;
+    }
+
+    #timer {
+      position: absolute;
+      top: 65px;
+      width: 100%;
+      text-align: center;
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.7);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+
+    #startButton {
+      position: absolute;
+      top: 55%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 15px 35px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      display: inline-block;
+      background: #333;
+      color: white;
+      border: 3px solid white;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    #startButton:hover {
+      background: #555;
+      transform: translate(-50%, -50%) scale(1.05);
+    }
+
+    #ytPlayer { display: none; }
+
+    .fling-indicator {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border: 2px solid rgba(255, 80, 80, 0.8);
+      border-radius: 50%;
+      pointer-events: none;
+      animation: flingPulse 0.4s ease-out;
+    }
+
+    @keyframes flingPulse {
+      0% { 
+        transform: scale(0.5); 
+        opacity: 1;
+      }
+      100% { 
+        transform: scale(2); 
+        opacity: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="game">
+    <div id="centerCircle"></div>
+    <div id="cursorDot"></div>
+    <div id="energyBar"><div id="energyFill"></div></div>
+    <div id="message">Keep the cursor in the center while the music plays...</div>
+    <div id="timer"></div>
+    <button id="startButton">Start Minigame</button>
+    <div id="ytPlayer"></div>
+  </div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script>
+
+  function randomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  // ================= CONFIG =================
+  const CONFIG = {
+    centerRadius: 37,        // Radius of the center circle
+    gracePeriod: 7000,
+    
+    flingStrength: 67,             // Strong enough to always hit edges
+    flingRecoil: 0.5,              // Extra shake after fling
+    flingInterval: randomInt(1, 3),          // Average seconds between flings
+    burstChance: 0.35,
+    
+    mouseControl: 0.5,
+    jitterIntensity: 6,          // Smooth constant shake
+    smoothing: 0.90,
+    
+    fillRate: 1.0,
+    drainRate: 0.5,
+    
+    videoId: 'Tj6ewHqYZpQ'
+  };
+
+  // ================= DOM ELEMENTS =================
+  const game = document.getElementById("game");
+  const cursorDot = document.getElementById("cursorDot");
+  const centerCircle = document.getElementById("centerCircle");
+  const energyFill = document.getElementById("energyFill");
+  const message = document.getElementById("message");
+  const timer = document.getElementById("timer");
+  const startButton = document.getElementById("startButton");
+
+  // ================= GAME STATE =================
+  let pos = { x: window.innerWidth/2, y: window.innerHeight/2 };
+  let vel = { x: 0, y: 0 };
+  let jitter = { x: 0, y: 0 };
+  let energy = 1;
+
+  let player = null;
+  let videoDuration = 30000;
+  let startTime = null;
+  let running = false;
+  let flingTimer = null;
+  let rafId = null;
+  let lastFrame = null;
+  let flingCount = 0;
+
+  // ================= UTILS =================
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  
+  const getCenter = () => {
+    const rect = centerCircle.getBoundingClientRect();
+    return { x: rect.left + rect.width/2, y: rect.top + rect.height/2 };
+  };
+  
+  const setCursorPos = (x, y) => {
+    cursorDot.style.left = `${x}px`;
+    cursorDot.style.top = `${y}px`;
+  };
+
+  // ================= VISUAL FEEDBACK =================
+  function showFlingIndicator(x, y) {
+    const indicator = document.createElement('div');
+    indicator.className = 'fling-indicator';
+    indicator.style.left = `${x - 20}px`;
+    indicator.style.top = `${y - 20}px`;
+    game.appendChild(indicator);
+    setTimeout(() => indicator.remove(), 400);
+  }
+
+  function flashCursor() {
+    cursorDot.classList.add('flinged');
+    setTimeout(() => cursorDot.classList.remove('flinged'), 200);
+  }
+
+  // ================= YOUTUBE =================
+  function onYouTubeIframeAPIReady() {
+    player = new YT.Player('ytPlayer', {
+      height: '0', width: '0', videoId: CONFIG.videoId,
+      playerVars: { autoplay: 0, controls: 0, disablekb: 1 },
+      events: { 'onReady': () => {
+        const check = setInterval(() => {
+          const dur = player.getDuration();
+          if(dur > 0){ 
+            videoDuration = dur * 1000; 
+            clearInterval(check); 
+          }
+        }, 100);
+      }}
+    });
+  }
+
+  // ================= FLING MECHANICS =================
+  function fling(isBurst = false) {
+    const elapsed = Date.now() - startTime;
+    if (elapsed < CONFIG.gracePeriod) return;
+    
+    flingCount++;
+    
+    // Pick a completely random direction
+    const angle = Math.random() * Math.PI * 2;
+    
+    // Calculate required velocity to reach edge
+    const distToEdgeX = angle > Math.PI/2 && angle < 3*Math.PI/2 ? 
+                        pos.x : window.innerWidth - pos.x;
+    const distToEdgeY = angle > 0 && angle < Math.PI ? 
+                        window.innerHeight - pos.y : pos.y;
+    
+    // Strong base power that guarantees edge hit
+    const timeFactor = Math.min(2.5, 1 + (flingCount * 0.05));
+    const power = CONFIG.flingStrength * timeFactor * (isBurst ? 0.8 : 1);
+    
+    // Apply velocity in random direction
+    vel.x = Math.cos(angle) * power;
+    vel.y = Math.sin(angle) * power;
+    
+    // Add recoil jitter
+    jitter.x += (Math.random() - 0.5) * CONFIG.flingRecoil * 30;
+    jitter.y += (Math.random() - 0.5) * CONFIG.flingRecoil * 30;
+    
+    showFlingIndicator(pos.x, pos.y);
+    if (!isBurst) flashCursor();
+  }
+
+  function tryBurstFling() {
+    const elapsed = Date.now() - startTime;
+    if (elapsed < CONFIG.gracePeriod) return;
+    
+    if (Math.random() < CONFIG.burstChance) {
+      const burstCount = Math.floor(Math.random() * 2) + 2;
+      for (let i = 0; i < burstCount; i++) {
+        setTimeout(() => fling(true), i * 120);
+      }
+    } else {
+      fling();
+    }
+  }
+
+  // ================= INPUT =================
+  function handlePointerMove(e) {
+    if (!running) return;
+    vel.x += e.movementX * CONFIG.mouseControl;
+    vel.y += e.movementY * CONFIG.mouseControl;
+  }
+
+  // ================= UPDATE LOOP =================
+  function update(dt) {
+    // Smooth damping
+    vel.x *= CONFIG.smoothing;
+    vel.y *= CONFIG.smoothing;
+    
+    if (Math.abs(vel.x) < 0.05) vel.x = 0;
+    if (Math.abs(vel.y) < 0.05) vel.y = 0;
+    
+    // Smooth jitter - always present for shakiness
+    const jitterTarget = {
+      x: (Math.random() - 0.5) * CONFIG.jitterIntensity * 3,
+      y: (Math.random() - 0.5) * CONFIG.jitterIntensity * 3
+    };
+    jitter.x = lerp(jitter.x, jitterTarget.x, 0.25);
+    jitter.y = lerp(jitter.y, jitterTarget.y, 0.25);
+    
+    // Move cursor with jitter overlay
+    pos.x += vel.x + jitter.x;
+    pos.y += vel.y + jitter.y;
+
+    // Edge bounce
+    const margin = 8;
+    
+    if (pos.x <= margin) {
+      pos.x = margin;
+      vel.x = Math.abs(vel.x) * 0.6;
+    } else if (pos.x >= window.innerWidth - margin) {
+      pos.x = window.innerWidth - margin;
+      vel.x = -Math.abs(vel.x) * 0.6;
+    }
+    
+    if (pos.y <= margin) {
+      pos.y = margin;
+      vel.y = Math.abs(vel.y) * 0.6;
+    } else if (pos.y >= window.innerHeight - margin) {
+      pos.y = window.innerHeight - margin;
+      vel.y = -Math.abs(vel.y) * 0.6;
+    }
+
+    // Energy
+    const center = getCenter();
+    const dist = Math.hypot(pos.x - center.x, pos.y - center.y);
+    const inCenter = dist <= CONFIG.centerRadius;
+    
+    energy += (inCenter ? CONFIG.fillRate : -CONFIG.drainRate) * dt;
+    energy = clamp(energy, 0, 1);
+
+    centerCircle.classList.toggle('active', inCenter);
+    energyFill.style.width = `${energy * 100}%`;
+
+    // Timer
+    const elapsed = Date.now() - startTime;
+    const remaining = Math.max(0, videoDuration - elapsed);
+    const gracePeriodRemaining = Math.max(0, CONFIG.gracePeriod - elapsed);
+    
+    if (gracePeriodRemaining > 0) {
+      timer.innerText = `Grace: ${(gracePeriodRemaining / 1000).toFixed(1)}s | Time: ${(remaining / 1000).toFixed(1)}s`;
+      timer.style.color = '#88ff88';
+      message.innerText = "Get ready...";
+      message.style.color = '#88ff88';
+    } else {
+      if (elapsed < CONFIG.gracePeriod + 100) {
+        message.innerText = "⚠️ CHAOS UNLEASHED! ⚠️";
+        message.style.color = '#ff4444';
+        setTimeout(() => {
+          if (running) {
+            message.innerText = "Survive!";
+            message.style.color = 'white';
+          }
+        }, 1500);
+      }
+      timer.innerText = `Time: ${(remaining / 1000).toFixed(1)}s`;
+      timer.style.color = 'white';
+    }
+
+    if (energy <= 0) endGame(false);
+    if (elapsed >= videoDuration) endGame(true);
+
+    setCursorPos(pos.x, pos.y);
+  }
+
+  function loop(ts) {
+    if (!lastFrame) lastFrame = ts;
+    const dt = Math.min(0.05, (ts - lastFrame) / 1000);
+    lastFrame = ts;
+    update(dt);
+    if (running) rafId = requestAnimationFrame(loop);
+  }
+
+  // ================= POINTER LOCK =================
+  function requestPointerLock() {
+    game.requestPointerLock = game.requestPointerLock || 
+                               game.mozRequestPointerLock || 
+                               game.webkitRequestPointerLock;
+    if (game.requestPointerLock) game.requestPointerLock();
+  }
+
+  function handlePointerLockChange() {
+    if (document.pointerLockElement !== game && running) {
+      endGame(false);
+    }
+  }
+
+  document.addEventListener("pointerlockchange", handlePointerLockChange);
+  document.addEventListener("mozpointerlockchange", handlePointerLockChange);
+  document.addEventListener("webkitpointerlockchange", handlePointerLockChange);
+
+  // ================= START / END =================
+  function startGame() {
+    if (!player) { 
+      alert("YouTube not ready!"); 
+      return; 
+    }
+
+    energy = 1;
+    pos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    vel = { x: 0, y: 0 };
+    jitter = { x: 0, y: 0 };
+    flingCount = 0;
+    setCursorPos(pos.x, pos.y);
+    startTime = Date.now();
+    running = true;
+    lastFrame = null;
+    
+    message.innerText = "Get ready...";
+    message.style.color = 'white';
+    timer.style.display = "block";
+    startButton.style.display = "none";
+
+    document.addEventListener("mousemove", handlePointerMove);
+
+    try {
+      player.seekTo(0);
+      player.playVideo();
+    } catch(e) {
+      console.error("YouTube error:", e);
+    }
+
+    flingTimer = setInterval(tryBurstFling, CONFIG.flingInterval * 1000);
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function endGame(won) {
+    if (!running) return;
+    running = false;
+    
+    cancelAnimationFrame(rafId);
+    clearInterval(flingTimer);
+    document.removeEventListener("mousemove", handlePointerMove);
+    
+    if (player) {
+      try { player.pauseVideo(); } catch(e) {}
+    }
+
+    if (document.exitPointerLock) document.exitPointerLock();
+
+    centerCircle.classList.remove('active');
+    timer.style.display = "none";
+
+    message.innerText = won ? 
+      "✅ YOU WIN! ✅" : 
+      "❌ YOU LOSE ❌";
+    message.style.color = won ? '#44ff44' : '#ff4444';
+    
+    startButton.innerText = "Retry";
+    startButton.style.display = "inline-block";
+  }
+
+  // ================= INIT =================
+  window.addEventListener("mousemove", (e) => {
+    if (!running && !document.pointerLockElement) {
+      setCursorPos(e.clientX, e.clientY);
+    }
+  });
+
+  startButton.addEventListener("click", () => {
+    requestPointerLock();
+
+    const startIfLocked = () => {
+      if (document.pointerLockElement === game) {
+        document.removeEventListener("pointerlockchange", startIfLocked);
+        document.removeEventListener("mozpointerlockchange", startIfLocked);
+        document.removeEventListener("webkitpointerlockchange", startIfLocked);
+        startGame();
+      }
+    };
+    
+    document.addEventListener("pointerlockchange", startIfLocked);
+    document.addEventListener("mozpointerlockchange", startIfLocked);
+    document.addEventListener("webkitpointerlockchange", startIfLocked);
+    
+    setTimeout(() => {
+      if (!document.pointerLockElement) {
+        document.removeEventListener("pointerlockchange", startIfLocked);
+        document.removeEventListener("mozpointerlockchange", startIfLocked);
+        document.removeEventListener("webkitpointerlockchange", startIfLocked);
+        alert("Click 'Allow' for pointer lock!");
+      }
+    }, 3000);
+  });
+
+  setCursorPos(pos.x, pos.y);
+  timer.style.display = "none";
+  </script>
+</body>
+</html>
