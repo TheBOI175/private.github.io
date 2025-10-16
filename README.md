@@ -59,3 +59,7 @@ The game includes a `CONFIG` object with customizable parameters:
 ## Setup
 
 Simply open `index.html` in a web browser. The game will automatically load the YouTube API and be ready to play.
+
+## Author
+
+Mowgli
